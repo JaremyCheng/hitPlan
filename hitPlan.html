@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>Document</title>
+	<script src='http://apps.bdimg.com/libs/jquery/1.9.1/jquery.min.js'></script>
+	<style>
+		canvas {
+			border: 1px solid #ff6600;
+		}
+	</style>
+</head>
+<body>
+<script>
+	//按键MAP
+	var specialKeys = {
+		8: "backspace", 9: "tab", 13: "return", 16: "shift", 17: "ctrl", 18: "alt", 19: "pause",
+		20: "capslock", 27: "esc", 32: "space", 33: "pageup", 34: "pagedown", 35: "end", 36: "home",
+		37: "left", 38: "up", 39: "right", 40: "down", 45: "insert", 46: "del",
+		96: "0", 97: "1", 98: "2", 99: "3", 100: "4", 101: "5", 102: "6", 103: "7",
+		104: "8", 105: "9", 106: "*", 107: "+", 109: "-", 110: ".", 111: "/",
+		112: "f1", 113: "f2", 114: "f3", 115: "f4", 116: "f5", 117: "f6", 118: "f7", 119: "f8",
+		120: "f9", 121: "f10", 122: "f11", 123: "f12", 144: "numlock", 145: "scroll", 191: "/", 224: "meta"
+	};
+	//关卡记录点
+	var checkPoint = {
+		0: {percent: 0.1, speed: 3, name: "第一关"},
+		50: {percent: 0.11, speed: 3.3, name: "第二关"},
+		100: {percent: 0.12, speed: 3.6, name: "第三关"},
+		200: {percent: 0.13, speed: 3.9, name: "第四关"},
+		300: {percent: 0.14, speed: 4.2, name: "第五关"},
+		500: {percent: 0.15, speed: 4.5, name: "第六关"},
+		700: {percent: 0.16, speed: 4.7, name: "第七关"},
+		1000: {percent: 0.17, speed: 4.9, name: "第八关"},
+		1400: {percent: 0.18, speed: 5.2, name: "第九关"},
+		1900: {percent: 0.19, speed: 5.5, name: "第十关"},
+		2500: {percent: 0.2, speed: 6, name: "最终关"}
+	};
+	//记录按下的按钮
+	var keydown = {};
+	var CANVAS_WIDTH = 480,
+			CANVAS_HEIGHT = 320;
+	var canvasElement = $("<canvas width='" + CANVAS_WIDTH + "' height = '" + CANVAS_HEIGHT + "'></canvas>");
+	var canvas = canvasElement.get(0).getContext('2d');
+	canvasElement.appendTo(document.body);
+
+	var FPS = 60;
+	var textX = 50;
+	var textY = 50;
+	//子弹列表
+	var playerBullets = [];
+	//敌人列表
+	var enemies = [];
+	//游戏记录对象
+	var game = {
+		//分手
+		score: 0,
+		//敌人生成
+		enemyPercent: 0.1,
+		//敌人速度
+		enemySpeed: 2,
+		//游戏结束
+		gameOver: false,
+		//绘画分数
+		drawScore: function(){
+			canvas.fillStyle = "#000";
+			canvas.font = "20px Georgia";
+			canvas.fillText(this.score, 400, 20);
+		},
+		//游戏结束绘画
+		drawGameOver: function(){
+			canvas.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+			canvas.fillStyle = "#000";
+			canvas.font = "50px Georgia";
+			canvas.fillText("GameOver!", 120, 140);
+		}
+	};
+	//图片处理 + 绘画
+	var Sprite = (function () {
+		//初始化代理对象
+		function LoaderProxy() {
+			return {
+				draw: $.noop,
+				fill: $.noop,
+				frame: $.noop,
+				update: $.noop,
+				width: null,
+				height: null
+			};
+		}
+
+		//图片绘画
+		function imgPainter(image, sourceX, sourceY, width, height) {
+			sourceX = sourceX || 0;
+			sourceY = sourceY || 0;
+			width = width || image.width;
+			height = height || image.height;
+
+			return {
+				draw: function (canvas, x, y) {
+					canvas.drawImage(
+							image,
+							sourceX,
+							sourceY,
+							width,
+							height,
+							x,
+							y,
+							width,
+							height
+					);
+				},
+				fill: function (canvas, x, y, width, height, repeat) {
+					repeat = repeat || "repeat";
+					var pattern = canvas.createPattern(image, repeat);
+					canvas.fillColor(pattern);
+					canvas.fillRect(x, y, width, height);
+				},
+				width: width,
+				height: height
+			};
+		}
+
+		//图片加载
+		imgPainter.load = function (url, loadedCallback) {
+//			console.log(1);
+			var img = new Image();
+			var proxy = LoaderProxy();
+
+			img.onload = function () {
+				var tile = imgPainter(this);
+
+				$.extend(proxy, tile);
+
+				if (loadedCallback) {
+					loadedCallback(proxy);
+				}
+			};
+
+			img.src = url;
+
+			return proxy;
+		};
+		//图片路径前缀
+		var spriteImagePath = "images/";
+
+		var Sprite = function (name, callback) {
+//				debugger;
+//				console.log(2);
+//				console.log(name);
+			return Sprite.load(spriteImagePath + name + ".png", callback);
+		};
+
+		Sprite.EMPTY = LoaderProxy();
+		Sprite.load = imgPainter.load;
+
+		return Sprite;
+
+	}());
+	//播放声音
+	var Sound = (function(){
+//		var format = $.browser.webkit ? ".mp3" : ".wav";
+		var format = ".wav";
+		var soundPath = "sounds/";
+		var sounds = {};
+		var CreateSound = function(name){
+			var sound= $('<audio />').get(0);
+			sound.src = soundPath + name + format;
+
+			return sound;
+		};
+		var Sound = function(name,maxChannels){
+			return {
+				play: function(){
+					Sound.play(name,maxChannels);
+				},
+				stop: function(name){
+					Sound.stop(name);
+				}
+			}
+		};
+		Sound.play = function(name, maxChannels){
+			maxChannels = maxChannels || 4;
+			if(!sounds[name]){
+				console.log("no sounds");
+				sounds[name] = [CreateSound(name)];
+			}else if(sounds[name] && sounds[name].length < maxChannels){
+				console.warn('add sound');
+				sounds[name].push(CreateSound(name));
+			}
+			console.log(1,sounds[name]);
+			console.log(2,sounds[name]);
+			var freeChannels = $.grep(sounds[name],function(sound){
+				return sound.currentTime == sound.duration || sound.currentTime == 0;
+			});
+			console.log(3,freeChannels);
+			if(freeChannels[0]){
+				try {
+					freeChannels[0].currentTime = 0;
+				} catch(e) {
+				}
+				freeChannels[0].play();
+			}
+			else{
+				if(sounds[name].length < maxChannels){
+					console.warn('fuck');
+					var sound = CreateSound(name);
+					sounds[name].push(sound);
+					sound.play();
+				}
+			}
+
+
+//			maxChannels = maxChannels || 4;
+//
+//			if(!sounds[name]) {
+//				sounds[name] = [CreateSound(name)];
+//			}
+//			console.log(sounds[name]);
+//			var freeChannels = $.grep(sounds[name], function(sound) {
+//				return sound.currentTime == sound.duration || sound.currentTime == 0
+//			});
+//			console.log(2,freeChannels);
+//			if(freeChannels[0]) {
+//				try {
+//					freeChannels[0].currentTime = 0;
+//				} catch(e) {
+//				}
+//				freeChannels[0].play();
+//			} else {
+//				console.log(3,sounds[name]);
+//				if(!maxChannels || sounds[name].length < maxChannels) {
+//					console.log(4,sounds[name].length);
+//					var sound = CreateSound(name);
+//					sounds[name].push(sound);
+//					sound.play();
+//				}
+//			}
+		};
+
+		Sound.stop = function(name){
+			var currentSound = sounds[name];
+			if(currentSound){
+				for(var i=0; i<currentSound.length; i++){
+					currentSound[i].stop();
+				}
+			}
+		};
+
+		return Sound;
+	}());
+	//返回按键名称
+	function keyName(event) {
+		return specialKeys[event.which] || String.fromCharCode(event.which).toLowerCase();
+	}
+
+	//判断范围内值  min, max
+	function clamp(val, min, max) {
+		return Math.min(Math.max(val, min), max);
+	}
+	//碰撞检测
+	function collides(obj, bound){
+		return obj.x < bound.x + bound.width && obj.x + obj.width > bound.x && obj.y < bound.y + bound.height && obj.y + obj.height > bound.y
+	}
+	//处理子弹和敌人的碰撞
+	function handleCollides(){
+		playerBullets.forEach(function(bullet){
+			enemies.forEach(function(enemy){
+				if(collides(bullet,enemy)){
+					enemy.explode();
+					bullet.active = false;
+				}
+			})
+		});
+		enemies.forEach(function(enemy){
+			if(collides(enemy,player)){
+				enemy.explode();
+				player.explode();
+			}
+		})
+	}
+	//子弹对象
+	function Bullet(I) {
+		I.active = true;
+
+		I.xVelocity = 0;
+		I.yVelocity = -I.speed;
+		I.width = 3;
+		I.height = 3;
+		I.color = "#000";
+		//子弹存在范围,返回true or false
+		I.inBounds = function () {
+			return I.x >= 0 && I.x <= CANVAS_WIDTH && I.y >= 0 && I.y <= CANVAS_HEIGHT;
+		};
+		//画子弹
+		I.draw = function () {
+			canvas.fillStyle = this.color;
+			canvas.fillRect(this.x, this.y, this.width, this.height);
+		};
+		//子弹位置变化
+		I.update = function () {
+			I.x += I.xVelocity;
+			I.y += I.yVelocity;
+
+			I.active = I.active && I.inBounds();
+		};
+
+		return I;
+	}
+	//敌人对象
+	function Enemy(I) {
+		I = I || {};
+
+		I.active = true;
+		I.age = Math.floor(Math.random() * 128);
+
+		I.color = "#A2B";
+
+		I.x = CANVAS_WIDTH / 4 + Math.random() * CANVAS_WIDTH / 2;
+		I.y = 0;
+		I.xVelocity = 0;
+		I.yVelocity = 2;
+
+		I.width = 32;
+		I.height = 32;
+		I.sprite = Sprite("enemy");
+		//敌人存在界限
+		I.inBounds = function () {
+			return I.x >= 0 && I.x <= CANVAS_WIDTH && I.y >= 0 && I.y <= CANVAS_HEIGHT;
+		};
+		//绘画敌人
+		I.draw = function () {
+			// canvas.fillStyle = this.color;
+			// canvas.fillRect(this.x, this.y, this.width, this.height);
+			this.sprite.draw(canvas, this.x, this.y);
+		};
+		//更新敌人的位置
+		I.update = function () {
+			I.x += I.xVelocity;
+			I.y += I.yVelocity;
+			I.xVelocity = 3 * Math.sin(I.age * Math.PI / 64);
+			I.age++;
+			I.active = I.active && I.inBounds();
+		};
+		//敌人破坏
+		I.explode = function(){
+			Sound.play("explosion");
+			this.active = false;
+			game.score++;
+		};
+		return I;
+	}
+
+	var subtitle = {
+		name: "第一章",
+		times: 0,
+		update: function(){
+			if(checkPoint[game.score]){
+				this.name = checkPoint[game.score].name;
+				this.times = 0;
+			}
+		},
+		draw: function(){
+			if(this.times < 17){
+				canvas.fillStyle = "#000";
+				canvas.font = "20px Georgia";
+				canvas.fillText(this.name, 230, 20);
+				this.times++;
+			}
+		}
+	};
+
+	//记录当前点击的按钮
+	$(window).on('keydown', function (e) {
+		var key = keyName(e);
+		keydown[key] = true;
+//		console.log(keydown);
+	});
+	//按钮松开的时候,去掉记录
+	$(window).on('keyup', function (e) {
+		var key = keyName(e);
+		keydown[key] = false;
+//		console.log(keydown);
+	});
+	//玩家对象
+	var player = {
+		active: true,
+		color: "#00A",
+		x: 220,
+		y: 280,
+		width: 32,
+		height: 32,
+		sprite: Sprite("player"),
+		//绘画玩家
+		draw: function () {
+			// this.x++
+			// this.y++
+			// canvas.fillStyle = this.color;
+			// canvas.fillRect(this.x, this.y, this.width, this.height);
+			this.sprite.draw(canvas, this.x, this.y);
+		},
+		//射击
+		shoot: function () {
+			Sound.play("shoot");
+			var bulletPosition = this.midpoint();
+
+			playerBullets.push(Bullet({
+				speed: game.enemySpeed,
+				x: bulletPosition.x,
+				y: bulletPosition.y
+			}));
+		},
+		//获取中间点
+		midpoint: function () {
+			return {
+				x: this.x + this.width / 2,
+				y: this.y + this.height / 2
+			}
+		},
+		//破坏机体
+		explode: function(){
+			this.active = false;
+			game.gameOver = true;
+		}
+	};
+
+	//fixme 注意 更新动画的唯一入口
+	function update() {
+		var checkNow  = checkPoint[game.score];
+		if (checkNow){
+			game.enemyPercent = checkNow.percent;
+			game.enemySpeed = checkNow.speed;
+		}
+		if (keydown.left === true) {
+			player.x -= 5;
+		}
+		if (keydown.right === true) {
+			player.x += 5;
+		}
+		if (keydown.up === true) {
+			player.y -= 5;
+		}
+		if (keydown.down === true) {
+			player.y += 5;
+		}
+		if (keydown.space === true) {
+			player.shoot();
+		}
+		player.x = clamp(player.x, 0, (480 - player.width));
+		player.y = clamp(player.y, 0, (320 - player.height));
+		//每一帧都要更新位置
+		playerBullets.forEach(function (bullet) {
+			bullet.update();
+		});
+		//每一帧都要更新位置
+		enemies.forEach(function (enemy) {
+			enemy.update();
+		});
+		//每一帧都要过滤下子弹是否有效,是否再范围内
+		playerBullets = playerBullets.filter(function (bullet) {
+			return bullet.active;
+		});
+		//每一帧都要过滤下子弹是否有效,是否再范围内
+		enemies = enemies.filter(function (enemy) {
+			return enemy.active;
+		});
+		//刷新敌人的几率
+		if (Math.random() < game.enemyPercent) {
+			enemies.push(Enemy());
+		}
+		handleCollides();
+		//关卡字幕
+		subtitle.update();
+	}
+	//fixme 注意 绘画动画的唯一入口
+	function draw() {
+		canvas.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+		player.draw();
+		playerBullets.forEach(function (bullet) {
+			bullet.draw();
+		});
+		enemies.forEach(function (enemy) {
+			enemy.draw();
+		});
+		game.drawScore();
+		subtitle.draw();
+	}
+
+
+	var timer = setInterval(function () {
+		if(game.gameOver){
+			game.drawGameOver();
+			clearInterval(timer);
+			console.log("gameover");
+			return
+		}
+		update();
+		draw();
+	}, 1000 / FPS);
+</script>
+</body>
+</html>
